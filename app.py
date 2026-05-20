@@ -775,13 +775,16 @@ def run_trend_break_backtest(prices, lookback=30, p_threshold=0.10):
         short_return = next_returns[shorts].mean() if shorts else 0
 
         results.append({
-            "Date": trade_date,
-            "Return": long_return - short_return,
-            "Number longs": len(longs),
-            "Number shorts": len(shorts),
-            "Longs": ", ".join(longs),
-            "Shorts": ", ".join(shorts),
-        })
+    "Date": trade_date,
+    "Return": long_return - short_return,
+    "Long book return": long_return,
+    "Short book return": -short_return,
+    "Short underlying return": short_return,
+    "Number longs": len(long_tickers),
+    "Number shorts": len(short_tickers),
+    "Longs": ", ".join(long_tickers),
+    "Shorts": ", ".join(short_tickers),
+})
 
     return pd.DataFrame(results)
 
