@@ -993,7 +993,32 @@ bt3, trades3 = run_normalisation_backtest(
     prices, sp500, market_prices, fred_factor_scores, LOOKBACK, P_THRESHOLD
 )
 show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
+show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
 
+st.markdown("### Strategy 3 portfolio history")
+
+if bt3.empty:
+    st.write("No Strategy 3 portfolio history.")
+else:
+    portfolio_history = bt3[[
+        "Date",
+        "Number longs",
+        "Number shorts",
+        "Longs",
+        "Shorts",
+        "Return",
+    ]].copy()
+
+    st.dataframe(portfolio_history, use_container_width=True)
+
+    csv = portfolio_history.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download Strategy 3 portfolio history as CSV",
+        data=csv,
+        file_name="strategy_3_portfolio_history.csv",
+        mime="text/csv",
+    )
 st.markdown("### Strategy 3 trade log")
 if trades3.empty:
     st.write("No Strategy 3 trades.")
