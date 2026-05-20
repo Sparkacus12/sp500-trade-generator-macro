@@ -5,7 +5,27 @@ import numpy as np
 import requests
 from io import StringIO
 from scipy.stats import shapiro, linregress
-from pandas_datareader import data as pdr
+@st.cache_data(ttl=60 * 60 * 12)
+def get_fred_data():
+    end = pd.Timestamp.today()
+    start = end - pd.DateOffset(years=5)
+
+    series = {}
+
+    for name, code in FRED_SERIES.items():
+        try:
+            url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={code}"
+            df = pd.read_csv(url)
+            df.columns = ["Date", name]
+            df["Date"] = pd.to_datetime(df["Date"])
+            df[name] = pd.to_numeric(df[name], errors="coerce")
+            df = df[(df["Date"] >= start) & (df["Date"] <= end)]
+            series[name] = df.set_index("Date")[name]
+        except Exception:
+            series[name] = pd.Series(dtype=float)
+
+    fred = pd.DataFrame(series).sort_index().ffill()
+    return fred
 
 # ============================================================
 # Settings
