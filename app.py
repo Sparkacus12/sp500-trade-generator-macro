@@ -1,3 +1,4 @@
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -6,7 +7,10 @@ import requests
 from io import StringIO
 from scipy.stats import shapiro, linregress
 
-st.set_page_config(page_title="S&P 500 Trade Generator", layout="wide")
+# ============================================================
+# Settings
+# ============================================================
+st.set_page_config(page_title="S&P 500 Academic Strategy Lab", layout="wide")
 
 LOOKBACK = 30
 P_THRESHOLD = 0.10
@@ -14,17 +18,17 @@ PRICE_PERIOD = "3y"
 MAX_LONGS = 3
 MAX_SHORTS = 3
 
-st.title("S&P 500 Trade Generator")
+st.title("S&P 500 Academic Strategy Lab")
 
 st.caption(
-    "Systematic screen only, not investment advice. "
-    "Uses Yahoo Finance prices plus FRED macro data. "
+    "Systematic research tool only, not investment advice. "
+    "Uses Yahoo Finance prices and FRED macro data. "
     "Normality test is Shapiro-Wilk on rolling 30-day returns."
 )
 
-# -----------------------------
-# S&P 500 and price data
-# -----------------------------
+# ============================================================
+# Data loaders
+# ============================================================
 
 @st.cache_data(ttl=60 * 60 * 12)
 def get_sp500():
@@ -82,10 +86,6 @@ def get_market_proxy_prices():
     return close.dropna(axis=1, how="all").ffill()
 
 
-# -----------------------------
-# FRED macro data
-# -----------------------------
-
 FRED_SERIES = {
     "industrial_production": "INDPRO",
     "retail_sales": "RSAFS",
@@ -105,6 +105,7 @@ FRED_SERIES = {
 
 @st.cache_data(ttl=60 * 60 * 12)
 def get_fred_data():
+    """Pull FRED CSVs directly, avoiding pandas-datareader dependency issues."""
     end = pd.Timestamp.today()
     start = end - pd.DateOffset(years=5)
 
@@ -114,29 +115,24 @@ def get_fred_data():
         try:
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={code}"
             raw = pd.read_csv(url)
-
             raw.columns = ["Date", name]
-            raw["Date"] = pd.to_datetime(raw["Date"])
+            raw["Date"] = pd.to_datetime(raw["Date"], errors="coerce")
             raw[name] = pd.to_numeric(raw[name].replace(".", np.nan), errors="coerce")
-
+            raw = raw.dropna(subset=["Date"])
             raw = raw[(raw["Date"] >= start) & (raw["Date"] <= end)]
             s = raw.set_index("Date")[name].dropna()
-
-            # Align daily/monthly series to month-end observations.
+            # Align daily and monthly series to month-end observations
             s = s.resample("ME").last()
-
             series[name] = s
-
         except Exception:
             series[name] = pd.Series(dtype=float)
 
-    fred = pd.DataFrame(series).sort_index().ffill()
-    return fred
+    return pd.DataFrame(series).sort_index().ffill()
 
 
-# -----------------------------
-# Statistical helpers
-# -----------------------------
+# ============================================================
+# Core helpers
+# ============================================================
 
 def trend_score(series):
     series = series.dropna()
@@ -186,7 +182,6 @@ def vol_compression_for_ticker(ticker, prices):
 
 def zscore_latest(series, lookback=36, transform="diff"):
     s = series.dropna()
-
     if len(s) < 15:
         return 0.0
 
@@ -215,9 +210,9 @@ def zscore_latest(series, lookback=36, transform="diff"):
     return float((window.iloc[-1] - window.mean()) / std)
 
 
-# -----------------------------
-# FRED macro factors
-# -----------------------------
+# ============================================================
+# FRED macro model
+# ============================================================
 
 def build_fred_macro_factor_scores(fred):
     if fred.empty:
@@ -270,98 +265,24 @@ def build_fred_macro_factor_scores(fred):
 
 
 SECTOR_FRED_WEIGHTS = {
-    "Information Technology": {
-        "Growth": 0.25,
-        "Inflation relief": 0.20,
-        "Financial conditions": 0.20,
-        "Liquidity": 0.25,
-        "Dollar relief": 0.10,
-    },
-    "Communication Services": {
-        "Growth": 0.30,
-        "Inflation relief": 0.15,
-        "Financial conditions": 0.15,
-        "Liquidity": 0.20,
-        "Dollar relief": 0.20,
-    },
-    "Consumer Discretionary": {
-        "Growth": 0.35,
-        "Inflation relief": 0.20,
-        "Financial conditions": 0.20,
-        "Liquidity": 0.15,
-        "Dollar relief": 0.10,
-    },
-    "Consumer Staples": {
-        "Growth": 0.10,
-        "Inflation relief": 0.35,
-        "Financial conditions": 0.15,
-        "Liquidity": 0.10,
-        "Dollar relief": 0.30,
-    },
-    "Industrials": {
-        "Growth": 0.45,
-        "Inflation relief": 0.10,
-        "Financial conditions": 0.20,
-        "Liquidity": 0.10,
-        "Dollar relief": 0.15,
-    },
-    "Materials": {
-        "Growth": 0.45,
-        "Inflation relief": 0.05,
-        "Financial conditions": 0.15,
-        "Liquidity": 0.10,
-        "Dollar relief": 0.15,
-        "Oil": 0.10,
-    },
-    "Energy": {
-        "Growth": 0.15,
-        "Inflation relief": -0.10,
-        "Financial conditions": 0.10,
-        "Liquidity": 0.05,
-        "Dollar relief": 0.10,
-        "Oil": 0.70,
-    },
-    "Financials": {
-        "Growth": 0.25,
-        "Inflation relief": 0.05,
-        "Financial conditions": 0.25,
-        "Liquidity": 0.05,
-        "Yield curve": 0.40,
-    },
-    "Health Care": {
-        "Growth": 0.10,
-        "Inflation relief": 0.25,
-        "Financial conditions": 0.15,
-        "Liquidity": 0.15,
-        "Dollar relief": 0.35,
-    },
-    "Real Estate": {
-        "Growth": 0.10,
-        "Inflation relief": 0.30,
-        "Financial conditions": 0.25,
-        "Liquidity": 0.25,
-        "Yield curve": -0.10,
-    },
-    "Utilities": {
-        "Growth": -0.05,
-        "Inflation relief": 0.35,
-        "Financial conditions": 0.25,
-        "Liquidity": 0.25,
-        "Yield curve": -0.10,
-    },
+    "Information Technology": {"Growth": 0.25, "Inflation relief": 0.20, "Financial conditions": 0.20, "Liquidity": 0.25, "Dollar relief": 0.10},
+    "Communication Services": {"Growth": 0.30, "Inflation relief": 0.15, "Financial conditions": 0.15, "Liquidity": 0.20, "Dollar relief": 0.20},
+    "Consumer Discretionary": {"Growth": 0.35, "Inflation relief": 0.20, "Financial conditions": 0.20, "Liquidity": 0.15, "Dollar relief": 0.10},
+    "Consumer Staples": {"Growth": 0.10, "Inflation relief": 0.35, "Financial conditions": 0.15, "Liquidity": 0.10, "Dollar relief": 0.30},
+    "Industrials": {"Growth": 0.45, "Inflation relief": 0.10, "Financial conditions": 0.20, "Liquidity": 0.10, "Dollar relief": 0.15},
+    "Materials": {"Growth": 0.45, "Inflation relief": 0.05, "Financial conditions": 0.15, "Liquidity": 0.10, "Dollar relief": 0.15, "Oil": 0.10},
+    "Energy": {"Growth": 0.15, "Inflation relief": -0.10, "Financial conditions": 0.10, "Liquidity": 0.05, "Dollar relief": 0.10, "Oil": 0.70},
+    "Financials": {"Growth": 0.25, "Inflation relief": 0.05, "Financial conditions": 0.25, "Liquidity": 0.05, "Yield curve": 0.40},
+    "Health Care": {"Growth": 0.10, "Inflation relief": 0.25, "Financial conditions": 0.15, "Liquidity": 0.15, "Dollar relief": 0.35},
+    "Real Estate": {"Growth": 0.10, "Inflation relief": 0.30, "Financial conditions": 0.25, "Liquidity": 0.25, "Yield curve": -0.10},
+    "Utilities": {"Growth": -0.05, "Inflation relief": 0.35, "Financial conditions": 0.25, "Liquidity": 0.25, "Yield curve": -0.10},
 }
 
 
 def fred_sector_macro_score(sector, fred_factor_scores):
     weights = SECTOR_FRED_WEIGHTS.get(
         sector,
-        {
-            "Growth": 0.30,
-            "Inflation relief": 0.20,
-            "Financial conditions": 0.20,
-            "Liquidity": 0.15,
-            "Dollar relief": 0.15,
-        },
+        {"Growth": 0.30, "Inflation relief": 0.20, "Financial conditions": 0.20, "Liquidity": 0.15, "Dollar relief": 0.15},
     )
     return sum(weights.get(k, 0.0) * fred_factor_scores.get(k, 0.0) for k in weights)
 
@@ -400,10 +321,7 @@ def market_macro_score(sector, ticker, prices, market_prices):
 def combined_macro_earnings_score(sector, ticker, prices, market_prices, fred_factor_scores):
     fred_score = fred_sector_macro_score(sector, fred_factor_scores)
     mkt_score = market_macro_score(sector, ticker, prices, market_prices)
-
-    # Tilted toward FRED to make it more academic, with market-price confirmation.
     total = 2.0 * fred_score + 0.35 * mkt_score
-
     return total, fred_score, mkt_score
 
 
@@ -425,9 +343,9 @@ def implied_earnings_revision_score(row):
     )
 
 
-# -----------------------------
+# ============================================================
 # Backtest helpers
-# -----------------------------
+# ============================================================
 
 def performance_stats(bt):
     bt = bt.dropna().copy()
@@ -435,16 +353,15 @@ def performance_stats(bt):
         return bt, np.nan, np.nan, np.nan, np.nan, np.nan
 
     bt["Equity curve"] = (1 + bt["Return"]).cumprod()
+    if "Long book return" in bt.columns:
+        bt["Long book equity"] = (1 + bt["Long book return"]).cumprod()
+    if "Short book return" in bt.columns:
+        bt["Short book equity"] = (1 + bt["Short book return"]).cumprod()
 
     total_return = bt["Equity curve"].iloc[-1] - 1
     annualised_return = bt["Equity curve"].iloc[-1] ** (252 / len(bt)) - 1
     annualised_vol = bt["Return"].std() * np.sqrt(252)
-
-    if bt["Return"].std() != 0:
-        sharpe = bt["Return"].mean() / bt["Return"].std() * np.sqrt(252)
-    else:
-        sharpe = np.nan
-
+    sharpe = bt["Return"].mean() / bt["Return"].std() * np.sqrt(252) if bt["Return"].std() != 0 else np.nan
     drawdown = bt["Equity curve"] / bt["Equity curve"].cummax() - 1
     max_drawdown = drawdown.min()
 
@@ -456,7 +373,7 @@ def show_backtest(name, bt):
 
     if bt.empty:
         st.write("No results generated.")
-        return
+        return bt
 
     bt, total_return, annualised_return, annualised_vol, sharpe, max_drawdown = performance_stats(bt)
 
@@ -467,14 +384,21 @@ def show_backtest(name, bt):
     c4.metric("Sharpe ratio", f"{sharpe:.2f}")
     c5.metric("Max drawdown", f"{max_drawdown:.2%}")
 
-    st.line_chart(bt.set_index("Date")["Equity curve"])
-    st.markdown("**Recent trades / positions**")
-    st.dataframe(bt.tail(20), use_container_width=True)
+    chart_cols = ["Equity curve"]
+    if "Long book equity" in bt.columns:
+        chart_cols.append("Long book equity")
+    if "Short book equity" in bt.columns:
+        chart_cols.append("Short book equity")
+
+    st.line_chart(bt.set_index("Date")[chart_cols])
+    st.markdown("**Recent portfolio history**")
+    st.dataframe(bt.tail(30), use_container_width=True)
+    return bt
 
 
-# -----------------------------
-# Load all data
-# -----------------------------
+# ============================================================
+# Load data
+# ============================================================
 
 with st.spinner("Loading S&P 500, prices, market proxies and FRED macro data..."):
     sp500 = get_sp500()
@@ -487,9 +411,9 @@ fred_factor_scores = build_fred_macro_factor_scores(fred)
 available = [t for t in tickers if t in prices.columns]
 
 
-# -----------------------------
+# ============================================================
 # FRED dashboard
-# -----------------------------
+# ============================================================
 
 st.subheader("FRED macro regime dashboard")
 
@@ -498,20 +422,18 @@ fred_table = pd.DataFrame(
 ).sort_values("Factor")
 
 st.dataframe(fred_table, use_container_width=True)
-
 st.write("FRED latest date:", fred.index.max())
 st.write("FRED rows loaded:", len(fred))
-
-st.write(
-    "FRED factors are mapped to sector earnings sensitivity weights, then combined with "
-    "market-implied confirmation. This is closer to the paper’s idea than ETF momentum alone, "
+st.caption(
+    "FRED factors are mapped to sector earnings sensitivity weights, then combined "
+    "with market-implied confirmation. This is closer to the academic paper's macro-nowcast idea, "
     "but it is still not a true analyst EPS revision model."
 )
 
 
-# -----------------------------
-# Current screen
-# -----------------------------
+# ============================================================
+# Current-day screen
+# ============================================================
 
 rows = []
 
@@ -554,12 +476,10 @@ df["Macro signal"] = df["Combined macro earnings score"].apply(score_to_signal)
 
 market_30d_return = pct_return(market_prices, "SPY")
 
-
 def sector_relative_strength(row):
     sector_etf = MARKET_TICKERS.get(row["GICS Sector"])
     sector_ret = pct_return(market_prices, sector_etf)
     return row["30d return"] - sector_ret
-
 
 df["Relative strength vs market"] = df["30d return"] - market_30d_return
 df["Relative strength vs sector"] = df.apply(sector_relative_strength, axis=1)
@@ -576,9 +496,9 @@ df["Implied earnings revision signal"] = np.where(
 )
 
 
-# -----------------------------
-# Strategy 1: live screen only
-# -----------------------------
+# ============================================================
+# Strategy 1: screen only
+# ============================================================
 
 passed = df[df["Pass normality"]]
 
@@ -594,11 +514,10 @@ sells = (
     .head(MAX_SHORTS)
 )
 
-st.subheader("Strategy 1: Core daily trend screen — no backtest")
-
+st.subheader("Strategy 1: Core daily trend screen â no backtest")
 st.write(
     "Finds stocks with normal 30-day return distributions and strong trends, "
-    "then ranks them by market-implied earnings revision pressure plus the FRED macro earnings backdrop."
+    "then ranks them by implied earnings revision pressure plus the FRED macro earnings backdrop."
 )
 
 display_cols = [
@@ -620,9 +539,9 @@ with c2:
     st.dataframe(sells[display_cols], use_container_width=True)
 
 
-# -----------------------------
+# ============================================================
 # Strategy 2 watchlist
-# -----------------------------
+# ============================================================
 
 st.subheader("Strategy 2: Trend-break watchlist")
 
@@ -692,9 +611,9 @@ with c2:
         st.write("No upside break candidates today.")
 
 
-# -----------------------------
-# Implied earnings revision overlay
-# -----------------------------
+# ============================================================
+# Earnings revision overlay
+# ============================================================
 
 st.subheader("Implied earnings revision overlay")
 
@@ -722,12 +641,11 @@ with c2:
     )
 
 
-# -----------------------------
+# ============================================================
 # Backtests
-# -----------------------------
+# ============================================================
 
 st.subheader("Backtests")
-
 st.write(
     "Backtests are only run for Strategy 2 and Strategy 3. "
     "Strategy 1 is a live screen only."
@@ -775,16 +693,16 @@ def run_trend_break_backtest(prices, lookback=30, p_threshold=0.10):
         short_return = next_returns[shorts].mean() if shorts else 0
 
         results.append({
-    "Date": trade_date,
-    "Return": long_return - short_return,
-    "Long book return": long_return,
-    "Short book return": -short_return,
-    "Short underlying return": short_return,
-    "Number longs": len(long_tickers),
-    "Number shorts": len(short_tickers),
-    "Longs": ", ".join(long_tickers),
-    "Shorts": ", ".join(short_tickers),
-})
+            "Date": trade_date,
+            "Return": long_return - short_return,
+            "Long book return": long_return,
+            "Short book return": -short_return,
+            "Short underlying return": short_return,
+            "Number longs": len(longs),
+            "Number shorts": len(shorts),
+            "Longs": ", ".join(longs),
+            "Shorts": ", ".join(shorts),
+        })
 
     return pd.DataFrame(results)
 
@@ -802,6 +720,7 @@ def run_normalisation_backtest(prices, sector_table, market_prices, fred_factor_
         signal_date = prices.index[i]
         trade_date = prices.index[i + 1]
 
+        # Exit existing positions
         for ticker in list(positions.keys()):
             current = prices[ticker].iloc[i - lookback:i].dropna()
             if len(current) < lookback:
@@ -863,6 +782,7 @@ def run_normalisation_backtest(prices, sector_table, market_prices, fred_factor_
                 })
                 del positions[ticker]
 
+        # Find new entries
         new_longs = []
         new_shorts = []
 
@@ -980,6 +900,9 @@ def run_normalisation_backtest(prices, sector_table, market_prices, fred_factor_
         results.append({
             "Date": trade_date,
             "Return": long_return - short_return,
+            "Long book return": long_return,
+            "Short book return": -short_return,
+            "Short underlying return": short_return,
             "Number longs": len(long_tickers),
             "Number shorts": len(short_tickers),
             "Longs": ", ".join(long_tickers),
@@ -990,80 +913,44 @@ def run_normalisation_backtest(prices, sector_table, market_prices, fred_factor_
 
 
 bt2 = run_trend_break_backtest(prices, LOOKBACK, P_THRESHOLD)
-show_backtest("Strategy 2: One-day trend-break reversal backtest", bt2)
+bt2 = show_backtest("Strategy 2: One-day trend-break reversal backtest", bt2)
 
 bt3, trades3 = run_normalisation_backtest(
     prices, sp500, market_prices, fred_factor_scores, LOOKBACK, P_THRESHOLD
 )
-show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
-show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
+bt3 = show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
 
 st.markdown("### Strategy 3 long book vs short book")
-
-if bt3.empty:
-    st.write("No Strategy 3 book-level returns.")
-else:
-    book_bt = bt3.copy()
-
-    book_bt["Long book equity"] = (1 + book_bt["Long book return"]).cumprod()
-    book_bt["Short book equity"] = (1 + book_bt["Short book return"]).cumprod()
-    book_bt["Combined equity"] = (1 + book_bt["Return"]).cumprod()
-
-    st.line_chart(
-        book_bt.set_index("Date")[[
-            "Long book equity",
-            "Short book equity",
-            "Combined equity",
-        ]]
-    )
-
-    long_total = book_bt["Long book equity"].iloc[-1] - 1
-    short_total = book_bt["Short book equity"].iloc[-1] - 1
-
-    c1, c2 = st.columns(2)
-    c1.metric("Long book total return", f"{long_total:.2%}")
-    c2.metric("Short book total return", f"{short_total:.2%}")
-
-    st.dataframe(
-        book_bt[[
-            "Date",
-            "Long book return",
-            "Short book return",
-            "Return",
-            "Number longs",
-            "Number shorts",
-            "Longs",
-            "Shorts",
-        ]].tail(50),
-        use_container_width=True,
-    )
-
-st.markdown("### Strategy 3 portfolio history")
-
-if bt3.empty:
-    st.write("No Strategy 3 portfolio history.")
-else:
-    portfolio_history = bt3[[
+if bt3 is not None and not bt3.empty:
+    book_cols = [
         "Date",
+        "Long book return",
+        "Short book return",
+        "Return",
         "Number longs",
         "Number shorts",
         "Longs",
         "Shorts",
-        "Return",
-    ]].copy()
+    ]
+    st.dataframe(bt3[book_cols].tail(100), use_container_width=True)
 
-    st.dataframe(portfolio_history, use_container_width=True)
-
-    csv = portfolio_history.to_csv(index=False).encode("utf-8")
-
+    csv = bt3[book_cols].to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download Strategy 3 portfolio history as CSV",
         data=csv,
         file_name="strategy_3_portfolio_history.csv",
         mime="text/csv",
     )
+
 st.markdown("### Strategy 3 trade log")
 if trades3.empty:
     st.write("No Strategy 3 trades.")
 else:
-    st.dataframe(trades3.tail(50), use_container_width=True)
+    st.dataframe(trades3.tail(100), use_container_width=True)
+    csv_trades = trades3.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Download Strategy 3 trade log as CSV",
+        data=csv_trades,
+        file_name="strategy_3_trade_log.csv",
+        mime="text/csv",
+    )
