@@ -220,7 +220,7 @@ passed = df[df["Pass normality"]]
 buys = passed[passed["Trend score"] > 0].sort_values("Implied earnings revision score", ascending=False).head(MAX_LONGS)
 sells = passed[passed["Trend score"] < 0].sort_values("Implied earnings revision score", ascending=True).head(MAX_SHORTS)
 
-st.subheader("Strategy 1: Core daily trend screen â no backtest")
+st.subheader("Strategy 1: Core daily trend screen")
 st.write(
     "This fast screen finds stocks with normal 30-day return distributions and strong trends, "
     "then ranks them by the market-implied earnings revision score."
