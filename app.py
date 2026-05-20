@@ -998,6 +998,46 @@ bt3, trades3 = run_normalisation_backtest(
 show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
 show_backtest("Strategy 3: Normalisation regime shift, hold until break", bt3)
 
+st.markdown("### Strategy 3 long book vs short book")
+
+if bt3.empty:
+    st.write("No Strategy 3 book-level returns.")
+else:
+    book_bt = bt3.copy()
+
+    book_bt["Long book equity"] = (1 + book_bt["Long book return"]).cumprod()
+    book_bt["Short book equity"] = (1 + book_bt["Short book return"]).cumprod()
+    book_bt["Combined equity"] = (1 + book_bt["Return"]).cumprod()
+
+    st.line_chart(
+        book_bt.set_index("Date")[[
+            "Long book equity",
+            "Short book equity",
+            "Combined equity",
+        ]]
+    )
+
+    long_total = book_bt["Long book equity"].iloc[-1] - 1
+    short_total = book_bt["Short book equity"].iloc[-1] - 1
+
+    c1, c2 = st.columns(2)
+    c1.metric("Long book total return", f"{long_total:.2%}")
+    c2.metric("Short book total return", f"{short_total:.2%}")
+
+    st.dataframe(
+        book_bt[[
+            "Date",
+            "Long book return",
+            "Short book return",
+            "Return",
+            "Number longs",
+            "Number shorts",
+            "Longs",
+            "Shorts",
+        ]].tail(50),
+        use_container_width=True,
+    )
+
 st.markdown("### Strategy 3 portfolio history")
 
 if bt3.empty:
